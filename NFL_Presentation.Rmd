@@ -1,0 +1,767 @@
+---
+title: "NFL Stats Predicted"
+author: "Rich L"
+date: "April 10, 2017"
+output:
+  slidy_presentation: default
+  ioslides_presentation: default
+  beamer_presentation: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+##Goal of analysis
+
+The goal of this capstone project was to set a baseline linear regression for predicting NFL statistics.  The use of the analysis would be to project player performance and see if the team I am working with needs to consider making adjustments given various factors of the upcoming game/season.
+
+Data from [http://armchairanalysis.com/data.php](www.armchairanlysis.com)
+
+
+```{r ,echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+
+suppressMessages(library(dplyr))
+suppressMessages(library(tidyr))
+suppressMessages(library(ggplot2))
+suppressMessages(library(reshape2))
+suppressMessages(library(caTools))
+suppressMessages(library(caret))
+suppressMessages(library(GGally))
+
+nfl_data <- read.csv("NFL_offense.csv")
+
+#make all null temperatures at game time "room" temperature
+nfl_data$temp[nfl_data$temp == "NULL"] <- 70
+nfl_data$temp <- as.integer(nfl_data$temp)
+
+#highlight temp extremes
+nfl_data <- mutate(nfl_data, cold_weather= ifelse(temp < 45, 1,0))
+nfl_data <- mutate(nfl_data, hot_weather=  ifelse(temp > 85, 1,0))
+
+#weather factors
+nfl_data <- mutate(nfl_data, grass_1 = ifelse(surf == "DD GrassMaster" | surf == "Grass",
+                                              1,0))
+nfl_data <- mutate(nfl_data, bad_weather_1 = ifelse(cond == "Light Rain" | 
+                                                      cond == "Rain" |
+                                                      cond == "Flurries" |
+                                                      cond == "Snow" |
+                                                      cond == "Foggy" |
+                                                      cond == "Windy" |
+                                                      cond == "Hazy" |
+                                                      cond == "Thunderstorms"|
+                                                      cond == "Light Snow" |
+                                                      cond == "Light Showers" ,1,0))
+
+
+#identify home team
+nfl_data$h <- as.character(nfl_data$h)
+nfl_data$team <- as.character(nfl_data$team)
+nfl_data <- mutate(nfl_data, home_team_1=  ifelse(h == team, 1,0))
+
+#identify position
+nfl_data <- mutate(nfl_data, is_WR =  ifelse(pos1 == "WR", 1,0))
+nfl_data <- mutate(nfl_data, is_TE =  ifelse(pos1 == "TE", 1,0))
+nfl_data <- mutate(nfl_data, is_RB =  ifelse(pos1 == "RB", 1,0))
+nfl_data <- mutate(nfl_data, is_QB =  ifelse(pos1 == "QB", 1,0))
+#age
+nfl_data <- mutate(nfl_data, age = year - yob)
+#replace 0 forty with avg for position
+nfl_data <- nfl_data %>%
+  group_by(pos1)%>%
+  mutate(forty1 = ifelse(forty == 0, mean(forty[forty>0]), forty))
+#replace 0 vertical with average for position
+nfl_data <- nfl_data %>%
+  group_by(pos1)%>%
+  mutate(vertical1 = ifelse(vertical == 0, mean(vertical[vertical>0]), vertical))
+#replace 0 arm length with formula for 40% of height is arm
+nfl_data$arm <- ifelse(nfl_data$arm == 0, nfl_data$height*0.4, nfl_data$arm)
+
+nfl_data$broad <- as.numeric(nfl_data$broad)
+
+nfl_data <- nfl_data %>%
+  group_by(pos1)%>%
+  mutate(broad1 = ifelse(broad == 0, mean(broad[broad>0]), broad))
+nfl_data <- nfl_data %>%
+  group_by(pos1)%>%
+  mutate(shuttle1 = ifelse(shuttle == 0, mean(shuttle[shuttle>0]), shuttle))
+nfl_data <- nfl_data %>%
+  group_by(pos1)%>%
+  mutate(cone1 = ifelse(cone == 0, mean(cone[cone>0]), cone))
+#clean teams and give each team a field
+nfl_data <- mutate(nfl_data, Teams =  ifelse(team == "STL" | team == "LA", "STL/LA",team))
+nfl_data <- mutate(nfl_data, ARI = ifelse(Teams == "ARI",1,0))
+nfl_data <- mutate(nfl_data, ATL = ifelse(Teams == "ATL",1,0))
+nfl_data <- mutate(nfl_data, BAL = ifelse(Teams == "BAL",1,0))
+nfl_data <- mutate(nfl_data, BUF = ifelse(Teams == "BUF",1,0))
+nfl_data <- mutate(nfl_data, CAR = ifelse(Teams == "CAR",1,0))
+nfl_data <- mutate(nfl_data, CHI = ifelse(Teams == "CHI",1,0))
+nfl_data <- mutate(nfl_data, CIN = ifelse(Teams == "CIN",1,0))
+nfl_data <- mutate(nfl_data, CLE = ifelse(Teams == "CLE",1,0))
+nfl_data <- mutate(nfl_data, DAL = ifelse(Teams == "DAL",1,0))
+nfl_data <- mutate(nfl_data, DEN = ifelse(Teams == "DEN",1,0))
+nfl_data <- mutate(nfl_data, DET = ifelse(Teams == "DET",1,0))
+nfl_data <- mutate(nfl_data, GB = ifelse(Teams == "GB",1,0))
+nfl_data <- mutate(nfl_data, HOU = ifelse(Teams == "HOU",1,0))
+nfl_data <- mutate(nfl_data, IND = ifelse(Teams == "IND",1,0))
+nfl_data <- mutate(nfl_data, JAC = ifelse(Teams == "JAC",1,0))
+nfl_data <- mutate(nfl_data, KC = ifelse(Teams == "KC",1,0))
+nfl_data <- mutate(nfl_data, MIA = ifelse(Teams == "MIA",1,0))
+nfl_data <- mutate(nfl_data, MINN = ifelse(Teams == "MIN",1,0))
+nfl_data <- mutate(nfl_data, NE = ifelse(Teams == "NE",1,0))
+nfl_data <- mutate(nfl_data, NOR = ifelse(Teams == "NO",1,0))
+nfl_data <- mutate(nfl_data, NYG = ifelse(Teams == "NYG",1,0))
+nfl_data <- mutate(nfl_data, NYJ = ifelse(Teams == "NYJ",1,0))
+nfl_data <- mutate(nfl_data, OAK = ifelse(Teams == "OAK",1,0))
+nfl_data <- mutate(nfl_data, PHI = ifelse(Teams == "PHI",1,0))
+nfl_data <- mutate(nfl_data, PIT = ifelse(Teams == "PIT",1,0))
+nfl_data <- mutate(nfl_data, SD = ifelse(Teams == "SD",1,0))
+nfl_data <- mutate(nfl_data, SEA = ifelse(Teams == "SEA",1,0))
+nfl_data <- mutate(nfl_data, SF = ifelse(Teams == "SF",1,0))
+nfl_data <- mutate(nfl_data, STL = ifelse(Teams == "STL/LA",1,0))
+nfl_data <- mutate(nfl_data, TB = ifelse(Teams == "TB",1,0))
+nfl_data <- mutate(nfl_data, TEN = ifelse(Teams == "TEN",1,0))
+nfl_data <- mutate(nfl_data, WAS = ifelse(Teams == "WAS",1,0))
+
+
+
+#calculate the averages by player, position, and team
+#receiving
+nfl_data <- nfl_data %>%
+              group_by(player.1)%>%
+                mutate(avg_recy_plyr = mean(recy))
+nfl_data <- nfl_data %>%
+              group_by(pos1)%>%
+                mutate(avg_recy_pos = mean(recy))
+nfl_data <- nfl_data %>%
+              group_by(Teams)%>%
+                mutate(avg_recy_team = mean(recy))
+nfl_data <- nfl_data %>%
+              group_by(player.1)%>%
+                mutate(avg_rec_plyr = mean(rec))
+nfl_data <- nfl_data %>%
+              group_by(pos1)%>%
+                mutate(avg_rec_pos = mean(rec))
+nfl_data <- nfl_data %>%
+              group_by(Teams)%>%
+                mutate(avg_rec_team = mean(rec))
+nfl_data <- nfl_data %>%
+              group_by(player.1)%>%
+                mutate(avg_trg_plyr = mean(trg))
+nfl_data <- nfl_data %>%
+              group_by(pos1)%>%
+                mutate(avg_trg_pos = mean(trg))
+nfl_data <- nfl_data %>%
+              group_by(Teams)%>%
+                mutate(avg_trg_team = mean(trg))
+nfl_data <- nfl_data %>%
+              group_by(player.1)%>%
+                mutate(avg_rectd_plyr = mean(tdrec))
+nfl_data <- nfl_data %>%
+              group_by(pos1)%>%
+                mutate(avg_rectd_pos = mean(tdrec))
+nfl_data <- nfl_data %>%
+              group_by(Teams)%>%
+                mutate(avg_rectd_team = mean(tdrec))
+
+
+
+#running
+nfl_data <- nfl_data %>%
+  group_by(player.1)%>%
+  mutate(avg_rbra_plyr = mean(ra))
+
+nfl_data <- nfl_data %>%
+  group_by(Teams)%>%
+  mutate(avg_rbra_team = mean(ra))
+
+nfl_data <- nfl_data %>%
+  group_by(pos1)%>%
+  mutate(avg_rbra_pos = mean(ra))
+
+nfl_data <- nfl_data %>%
+  group_by(player.1)%>%
+  mutate(avg_rbry_plyr = mean(ry))
+
+nfl_data <- nfl_data %>%
+  group_by(Teams)%>%
+  mutate(avg_rbry_team = mean(ry))
+
+nfl_data <- nfl_data %>%
+  group_by(pos1)%>%
+  mutate(avg_rbry_pos = mean(ry))
+
+nfl_data <- nfl_data %>%
+  group_by(player.1)%>%
+  mutate(avg_fuml_plyr = mean(fuml))
+
+nfl_data <- nfl_data %>%
+  group_by(Teams)%>%
+  mutate(avg_fuml_team = mean(fuml))
+
+nfl_data <- nfl_data %>%
+  group_by(pos1)%>%
+  mutate(avg_fuml_pos = mean(fuml))
+nfl_data <- nfl_data %>%
+  group_by(player.1)%>%
+  mutate(avg_tdr_plyr = mean(tdr))
+nfl_data <- nfl_data %>%
+  group_by(pos1)%>%
+  mutate(avg_tdr_pos = mean(tdr))
+nfl_data <- nfl_data %>%
+  group_by(Teams)%>%
+  mutate(avg_tdr_team = mean(tdr))
+
+
+
+#passing
+nfl_data <- nfl_data %>%
+  group_by(player.1)%>%
+  mutate(avg_qbpy_plyr = mean(py))
+
+nfl_data <- nfl_data %>%
+  group_by(Teams)%>%
+  mutate(avg_qbpy_team = mean(py))
+
+nfl_data <- nfl_data %>%
+  group_by(pos1)%>%
+  mutate(avg_qbpy_pos = mean(py))
+
+
+nfl_data <- nfl_data %>%
+  group_by(player.1)%>%
+  mutate(avg_qbpc_plyr = mean(pc))
+
+nfl_data <- nfl_data %>%
+  group_by(Teams)%>%
+  mutate(avg_qbpc_team = mean(pc))
+
+nfl_data <- nfl_data %>%
+  group_by(pos1)%>%
+  mutate(avg_qbpc_pos = mean(pc))
+
+nfl_data <- nfl_data %>%
+  group_by(player.1)%>%
+  mutate(avg_qbints_plyr = mean(ints))
+
+nfl_data <- nfl_data %>%
+  group_by(Teams)%>%
+  mutate(avg_qbints_team = mean(ints))
+
+nfl_data <- nfl_data %>%
+  group_by(pos1)%>%
+  mutate(avg_qbints_pos = mean(ints))
+
+nfl_data <- nfl_data %>%
+  group_by(player.1)%>%
+  mutate(avg_qbtdp_plyr = mean(tdp))
+
+nfl_data <- nfl_data %>%
+  group_by(Teams)%>%
+  mutate(avg_qbtdp_team = mean(tdp))
+
+nfl_data <- nfl_data %>%
+  group_by(pos1)%>%
+  mutate(avg_qbtdp_pos = mean(tdp))
+
+nfl_data <- nfl_data %>%
+  group_by(player.1)%>%
+  mutate(avg_qbpa_plyr = mean(pa))
+
+nfl_data <- nfl_data %>%
+  group_by(Teams)%>%
+  mutate(avg_qbpa_team = mean(pa))
+
+nfl_data <- nfl_data %>%
+  group_by(pos1)%>%
+  mutate(avg_qbpa_pos = mean(pa))
+
+#age
+
+nfl_data <- nfl_data %>%
+  group_by(age, pos1)%>%
+  mutate(avg_recy_age = mean(recy))
+
+nfl_data <- nfl_data %>%
+  group_by(age, pos1)%>%
+  mutate(age_count = n())
+
+
+nfl_data_fields<- subset(nfl_data, select = c("height", "weight", "cold_weather", "hot_weather",
+                         "home_team_1", "temp", "is_WR", "is_QB", "is_RB", "is_TE", "age",
+                         "forty1", "vertical1", "ARI", "ATL", "BAL", "BUF",
+                         "CAR", "CHI", "CIN", "CLE", "DAL", "DEN", "DET", "GB", "HOU", "IND",
+                         "JAC", "KC", "MIA", "MINN", "NE", "NOR", "NYG", "NYJ", "OAK", "PHI", "PIT",
+                         "SD", "SEA", "STL", "TB", "TEN", "WAS",
+                         "avg_recy_plyr","avg_recy_pos","avg_recy_team","avg_rec_plyr","avg_rec_pos",
+                         "avg_rec_team", "avg_trg_plyr","avg_trg_pos","avg_trg_team","avg_rectd_plyr",
+                         "avg_rectd_pos","avg_rectd_team","avg_tdr_plyr","avg_tdr_pos","avg_tdr_team",
+                         "avg_rbra_plyr","avg_rbra_pos", "avg_rbra_team","avg_rbry_plyr","avg_rbry_pos",
+                         "avg_rbry_team","avg_fuml_plyr","avg_fuml_pos", "avg_fuml_team","avg_qbpy_plyr",
+                         "avg_qbpy_pos", "avg_qbpy_team","avg_qbpa_plyr","avg_qbpa_pos","avg_qbpa_team",
+                         "avg_qbpc_plyr","avg_qbpc_pos", "avg_qbpc_team","avg_qbints_plyr", "avg_qbints_pos",
+                         "avg_qbints_team","avg_qbtdp_plyr","avg_qbtdp_pos","avg_qbtdp_team","grass_1",
+                         "bad_weather_1"))
+
+cor_nfl <- cor(nfl_data_fields)
+
+highlyCor_nfl_data_fields1 <- findCorrelation(cor_nfl, cutoff = .8)
+highlyCor_nfl_data_fields1
+
+highlyCor_nfl_data_fields2 <- findCorrelation(cor_nfl, cutoff = .85)
+highlyCor_nfl_data_fields2
+
+highlyCor_nfl_data_fields3 <- findCorrelation(cor_nfl, cutoff = .9)
+highlyCor_nfl_data_fields3
+
+filtered_nfl_data_fields <-nfl_data_fields
+filtered_nfl_data_fields <- filtered_nfl_data_fields[,-highlyCor_nfl_data_fields1]
+filtered_nfl_data_fields
+
+```
+
+## Data and relationships between fields
+```{r }
+qplot(x=Var1, y=Var2, data=melt(cor(filtered_nfl_data_fields)), fill=value, geom="tile")+
+  scale_fill_gradient2(limits=c(-1, 1))+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 5),
+        axis.text.y = element_text(size = 5))
+
+```
+
+Originally we had 86 fields on which we were going to evaluate.  We did a test for correlation, and removed any fields with a correlation above .8
+
+## Receiving Yards
+```{r ,echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+set.seed(123)
+split <- sample.split(nfl_data$recy, SplitRatio = 0.7)
+TrainRecy <- subset(nfl_data, split == TRUE)
+TestRecy <- subset(nfl_data, split == FALSE)
+preProcValues <- preProcess(TrainRecy, method = c("center", "scale"))
+trainTransformed <- predict(preProcValues, TrainRecy)
+testTransformed <- predict(preProcValues, TestRecy)
+wrrecyregform <- formula(paste("recy ~ ", 
+                         paste(colnames(filtered_nfl_data_fields), collapse="+")))
+
+#first run of the recy regression
+linRegrecy <- lm(wrrecyregform, data = trainTransformed)
+summary(linRegrecy)
+
+#updating formula to take out insignigicant values
+linRegrecy2 <- update(linRegrecy, ~. -height- hot_weather - home_team_1-vertical1-BUF-DAL-DEN-GB
+                      -NE-NOR-NYJ-SEA
+                      -avg_trg_team-avg_tdr_team-avg_rbra_team-avg_fuml_plyr-avg_fuml_team
+                      -avg_qbints_plyr
+                      -avg_qbints_team-avg_qbtdp_team-bad_weather1)
+
+summary(linRegrecy2)
+#updating formulas to remove any insignificant values
+linRegrecy3 <- update(linRegrecy2, ~. -JAC)
+summary(linRegrecy3)
+```
+Summary of receiving yards
+```{r}
+summary(linRegrecy3)
+```
+
+The R-squared is low for this analysis.  This is intuitive because of the nature of receiving.  The ball is never guaranteed to be in the player's hands, and there are up to 5 other players on the field at a time vying to have the ball thrown to them.  Another type of analysis is needed.
+
+
+## Plots of receiving yards
+```{r}
+par(mar = c(4, 4, 2, 2), mfrow = c(2, 2))
+plot(linRegrecy3, which = c(1,2,3,5))
+```
+
+The residuals vs fitted appears to be okay for the model.
+The normal Q-Q looks okay, however, it may have some skewness to it.
+The scale-location does not seem to be ideal.  The red line is not smooth, and there appears to be a gap in the data.
+The residuals vs leverage has some values that seem extreme.
+
+
+## Receptions
+```{r,echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+set.seed(123)
+splitrec <- sample.split(nfl_data$rec, SplitRatio = 0.7)
+TrainRec <- subset(nfl_data, split == TRUE)
+TestRec <- subset(nfl_data, split == FALSE)
+preProcValues <- preProcess(TrainRec, method = c("center", "scale"))
+trainTransformedrec <- predict(preProcValues, TrainRec)
+testTransformedrec <- predict(preProcValues, TestRec)
+recregform <- formula(paste("rec ~ ", 
+                               paste(colnames(filtered_nfl_data_fields), collapse="+")))
+
+
+
+linRegrec <- lm(recregform, data = trainTransformedrec)
+summary(linRegrec)
+  
+linRegrec2 <- update(linRegrec, ~. -hot_weather -forty1 -GB - SEA -avg_trg_team -avg_tdr_team
+                     -avg_rbra_team -avg_fuml_team -avg_qbtdp_team - avg_qbints_team)
+summary(linRegrec2)
+
+```
+```{r}
+summary(linRegrec2)
+```
+
+The adjusted R2 is not very strong (0.3489), this is due to the same problem in forecasting that we had in receiving yards.
+
+## Plots of receptions
+```{r}
+par(mar = c(4, 4, 2, 2), mfrow = c(2, 2))
+plot(linRegrec2, which = c(1,2,3,5))
+```
+
+## Targets
+```{r,echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+set.seed(123)
+splittrg <- sample.split(nfl_data$trg, SplitRatio = 0.7)
+Traintrg <- subset(nfl_data, split == TRUE)
+Testtrg <- subset(nfl_data, split == FALSE)
+preProcValues <- preProcess(Traintrg, method = c("center", "scale"))
+trainTransformedtrg <- predict(preProcValues, Traintrg)
+testTransformedtrg <- predict(preProcValues, Testtrg)
+trgregform <- formula(paste("trg ~ ", 
+                            paste(colnames(filtered_nfl_data_fields), collapse="+")))
+
+linRegtrg <- lm(trgregform, data = trainTransformedtrg)
+
+summary(linRegtrg)
+
+linRegtrg2 <- update(linRegtrg, ~. -height-cold_weather-hot_weather-forty1-vertical1-DAL-DEN-GB-NE-NOR-SEA
+                 -avg_trg_team -avg_tdr_team-avg_rbra_team -avg_fuml_team -avg_qbtdp_team 
+                 -avg_qbints_team - grass_1-bad_weather_1)
+```
+```{r}
+summary(linRegtrg2)
+```
+
+## Plots for Targets
+```{r}
+par(mar = c(4, 4, 2, 2), mfrow = c(2, 2))
+plot(linRegrec2, which = c(1:3,5))
+
+```
+
+## Receiving TD's
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+set.seed(123)
+splittdrec <- sample.split(nfl_data$tdrec, SplitRatio = 0.7)
+Traintdrec <- subset(nfl_data, split == TRUE)
+Testtdrec <- subset(nfl_data, split == FALSE)
+preProcValues <- preProcess(Traintdrec, method = c("center", "scale"))
+trainTransformedtdrec <- predict(preProcValues, Traintdrec)
+testTransformedtdrec <- predict(preProcValues, Testtdrec)
+tdrecregform <- formula(paste("tdrec ~ ", 
+                            paste(colnames(filtered_nfl_data_fields), collapse="+")))
+
+
+linRegRecTD <- lm(tdrecregform, data = trainTransformedtdrec)
+
+summary(linRegRecTD)
+
+
+linRegRecTD2 <- update(linRegRecTD, ~. -height-weight-cold_weather-hot_weather-home_team_1
+                       -forty1-is_WR-is_TE-age-vertical1-ARI-BAL-BUF-CAR-CIN-CLE-DAL-DEN-DET-GB
+                       -HOU-IND-JAC-KC-MIA-MINN-NE-NYG-NYJ-OAK-PHI-PIT-SEA-STL-TB-TEN-WAS
+                       -avg_trg_team -avg_tdr_team-avg_rbra_team-avg_rbry_plyr
+                       -avg_rbry_pos-avg_fuml_plyr-avg_fuml_team-avg_qbints_plyr_avg_qbtdp_team 
+                       -avg_qbints_team - grass_1-bad_weather_1)
+
+summary(linRegRecTD2)
+
+linRegRecTD3 <- update(linRegRecTD2, ~. -ATL-CHI-NOR-SD-avg_qbints_plyr-avg_qbints_team)
+
+
+```
+```{r}
+summary(linRegRecTD3)
+```
+
+R-squared is low for this statistic.  Touchdowns are much more random in nature that receptions or receiving yards.  We should look for other ways to predict this.  This stat relies heavily on the average TD's the player being analyzed usually scores.
+
+##Plots for receiving TD's
+```{r}
+par(mar = c(4, 4, 2, 2), mfrow = c(2, 2))
+plot(linRegRecTD3, which = c(1:3,5))
+```
+
+##Passing yards
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+set.seed(123)
+splitpy <- sample.split(nfl_data$py, SplitRatio = 0.7)
+Trainpy <- subset(nfl_data, split == TRUE)
+Testpy <- subset(nfl_data, split == FALSE)
+preProcValues <- preProcess(Trainpy, method = c("center", "scale"))
+trainTransformedpy <- predict(preProcValues, Trainpy)
+testTransformedpy <- predict(preProcValues, Testpy)
+pyregform <- formula(paste("py ~ ", 
+                              paste(colnames(filtered_nfl_data_fields), collapse="+")))
+
+
+linRegQBpyds <- lm(pyregform, data = trainTransformedpy)
+
+summary(linRegQBpyds)
+
+linRegQBpyds2 <- update(linRegQBpyds, ~.-hot_weather-home_team_1-vertical1-ATL-BAL-DAL-DEN-DET-KC
+                        -NOR-PHI-PIT-SEA-SD-WAS-avg_trg_team-avg_tdr_team-avg_rbra_team-avg_rbry_plyr
+                        -avg_fuml_team-avg_qbints_team-avg_qbtdp_team-grass_1)
+```
+```{r}
+summary(linRegQBpyds2)
+```
+
+Passing yards seem to be a much better stat to predict with linear regression.  This is intuitive given that there is usually only one QB.  He throws the ball 100% for his team.  His team usually invests heavily in him.  So the frequency is typically there, and the longevity is there too.
+
+
+##Plots for passing yards
+```{r}
+par(mar = c(4, 4, 2, 2), mfrow = c(2, 2))
+plot(linRegQBpyds2, which = c(1:3,5))
+```
+
+
+##Pass completions
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+set.seed(123)
+splitpc <- sample.split(nfl_data$pc, SplitRatio = 0.7)
+Trainpc <- subset(nfl_data, split == TRUE)
+Testpc <- subset(nfl_data, split == FALSE)
+preProcValues <- preProcess(Trainpc, method = c("center", "scale"))
+trainTransformedpc <- predict(preProcValues, Trainpc)
+testTransformedpc <- predict(preProcValues, Testpc)
+pcregform <- formula(paste("pc ~ ", 
+                           paste(colnames(filtered_nfl_data_fields), collapse="+")))
+
+
+linRegQBpc <- lm(pcregform, data = trainTransformedpc)
+summary(linRegQBpc)
+
+linRegQBpc2 <- update(linRegQBpc, ~.-hot_weather-home_team_1-vertical1-ATL-BAL-CIN-DAL-DEN-DET-KC
+                      -MIA-PHI-PIT-SEA-STL-WAS-avg_trg_team-avg_tdr_team-avg_rbra_team
+                      -avg_rbry_plyr-avg_fuml_team-avg_qbints_team-avg_qbtdp_team-grass_1 )
+```
+```{r}
+summary(linRegQBpc2)
+```
+
+
+##Plots for pass completions
+```{r}
+par(mar = c(4, 4, 2, 2), mfrow = c(2, 2))
+plot(linRegQBpc2, which = c(1:3,5))
+```
+
+
+## Interceptions
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+set.seed(123)
+splitints <- sample.split(nfl_data$ints, SplitRatio = 0.7)
+Trainints <- subset(nfl_data, split == TRUE)
+Testints <- subset(nfl_data, split == FALSE)
+preProcValues <- preProcess(Trainints, method = c("center", "scale"))
+trainTransformedints <- predict(preProcValues, Trainints)
+testTransformedints <- predict(preProcValues, Testints)
+intsregform <- formula(paste("ints ~ ", 
+                           paste(colnames(filtered_nfl_data_fields), collapse="+")))
+
+linRegQBInts <- lm(intsregform, data = trainTransformedints)
+summary(linRegQBInts) 
+
+linRegQBInts2 <- lm(ints ~ avg_qbints_plyr, data = trainTransformedints)
+```
+```{r}
+summary(linRegQBInts2)
+```
+
+
+##Plots for interceptions
+```{r}
+par(mar = c(4, 4, 2, 2), mfrow = c(2, 2))
+plot(linRegQBInts2, which = c(1:3,5))
+```
+
+
+##Pass Attempts
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+set.seed(123)
+splitpa <- sample.split(nfl_data$pa, SplitRatio = 0.7)
+Trainpa <- subset(nfl_data, split == TRUE)
+Testpa <- subset(nfl_data, split == FALSE)
+preProcValues <- preProcess(Trainpa, method = c("center", "scale"))
+trainTransformedpa <- predict(preProcValues, Trainpa)
+testTransformedpa <- predict(preProcValues, Testpa)
+paregform <- formula(paste("pa ~ ", 
+                             paste(colnames(filtered_nfl_data_fields), collapse="+")))
+
+linRegQBpa <- lm(paregform, data = trainTransformedpa)
+summary(linRegQBpa)
+
+linRegQBpa2 <- update(linRegQBpa, ~.-hot_weather-home_team_1-ATL-BAL-CLE-DAL-DEN-DET-KC
+                      -NOR-OAK-SEA-STL-WAS-avg_trg_team-avg_tdr_team-avg_rbra_team
+                      -avg_rbry_plyr-avg_fuml_team-avg_qbints_team-avg_qbtdp_team
+                      -grass_1-bad_weather_1 )
+summary(linRegQBpa2)
+
+linRegQBpa3 <- update(linRegQBpa2, ~.-vertical1-IND-PHI-PIT )
+```
+```{r}
+summary(linRegQBpa3)
+```
+
+
+##Plots for pass attempts
+```{r}
+par(mar = c(4, 4, 2, 2), mfrow = c(2, 2))
+plot(linRegQBpa3, which = c(1:3,5))
+```
+
+
+##Rushing yards
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+set.seed(123)
+splitry <- sample.split(nfl_data$ry, SplitRatio = 0.7)
+Trainry <- subset(nfl_data, split == TRUE)
+Testry <- subset(nfl_data, split == FALSE)
+preProcValues <- preProcess(Trainry, method = c("center", "scale"))
+trainTransformedry <- predict(preProcValues, Trainry)
+testTransformedry <- predict(preProcValues, Testry)
+ryregform <- formula(paste("ry ~ ", 
+                           paste(colnames(filtered_nfl_data_fields), collapse="+")))
+
+linRegRushYd <- lm(ryregform, data = trainTransformedry)
+summary(linRegRushYd)
+
+linRegRushYd2 <- update(linRegRushYd,~.-height-weight-hot_weather-home_team_1-is_WR-is_TE-forty1
+                        -vertical1-ARI-ATL-BAL - BUF - CAR - CHI
+                        -CIN - CLE - DAL - DEN - DET - GB - HOU - IND - JAC - KC - MIA 
+                        -MINN - NE - NOR - NYG-NYJ - OAK - PHI - PIT -SD - SEA - STL 
+                        -TB - TEN - WAS
+                        -avg_rectd_plyr-avg_trg_team-avg_tdr_team-avg_rbra_team-avg_rbry_pos
+                        -avg_fuml_team-avg_fuml_plyr-avg_qbints_team-avg_qbtdp_team
+                        -avg_qbints_plyr-bad_weather_1-grass_1)
+```
+```{r}
+summary(linRegRushYd2)
+```
+
+Rushing is also very much like passing.  Usually there is a main running back who gets the ball frequently.  It is also widely known that running back's productiondecline significantly with age. I was glad to see the model accounted for this as well.
+
+
+##Plots for rushing yards
+```{r}
+par(mar = c(4, 4, 2, 2), mfrow = c(2, 2))
+plot(linRegRushYd2, which = c(1:3,5))
+```
+
+##Rushing attempts
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+set.seed(123)
+splitra <- sample.split(nfl_data$ra, SplitRatio = 0.7)
+Trainra <- subset(nfl_data, split == TRUE)
+Testra <- subset(nfl_data, split == FALSE)
+preProcValues <- preProcess(Trainra, method = c("center", "scale"))
+trainTransformedra <- predict(preProcValues, Trainra)
+testTransformedra <- predict(preProcValues, Testra)
+raregform <- formula(paste("ra ~ ", 
+                           paste(colnames(filtered_nfl_data_fields), collapse="+")))
+
+linRegRushAtt <- lm(raregform, data = trainTransformedra)
+summary(linRegRushAtt)
+
+linRegRushAtt2 <- update(linRegRushYd,~.-height-weight-hot_weather-home_team_1-age-is_TE
+                         -vertical1-ARI-ATL-BAL - BUF - CAR - CHI
+                         -CIN - CLE - DAL - GB - IND - JAC - KC - MIA 
+                         -MINN - NE - NOR -NYJ - OAK - PHI - PIT -SD - SEA 
+                         -TB - TEN - WAS
+                         -avg_rectd_plyr-avg_trg_team-avg_tdr_team-avg_rbra_team
+                         -avg_fuml_team-avg_fuml_plyr-avg_qbints_team-avg_qbtdp_team-avg_qbints_plyr
+                         -bad_weather_1-grass_1)
+
+summary(linRegRushAtt2)
+```
+```{r}
+linRegRushAtt3 <- update(linRegRushYd,~.-is_WR-forty1-is_TE-DET-HOU-NYG-STL-avg_rbry_pos)
+summary(linRegRushAtt3)
+```
+
+##Plots for rushing attempts
+```{r}
+par(mar = c(4, 4, 2, 2), mfrow = c(2, 2))
+plot(linRegRushAtt3, which = c(1:3,2))
+```
+
+##Touchdowns rushing
+```{r,echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+set.seed(123)
+splitdr <- sample.split(nfl_data$tdr, SplitRatio = 0.7)
+Traintdr <- subset(nfl_data, split == TRUE)
+Testtdr <- subset(nfl_data, split == FALSE)
+preProcValues <- preProcess(Traintdr, method = c("center", "scale"))
+trainTransformedtdr <- predict(preProcValues, Traintdr)
+testTransformedtdr <- predict(preProcValues, Testtdr)
+tdrregform <- formula(paste("ra ~ ", 
+                           paste(colnames(filtered_nfl_data_fields), collapse="+")))
+
+linRegtdr <- lm(tdrregform, data = trainTransformedtdr)
+summary(linRegRushAtt)
+
+linRegtdr2 <- update(linRegRushYd,~.-height-weight-hot_weather
+                     -home_team_1-age-is_TE-vertical1-ARI-ATL-BAL - BUF - CAR - CHI
+                         -CIN - CLE - DAL - GB - JAC - KC - MIA 
+                         -MINN - NE - NOR -NYJ - OAK - PHI - PIT -SD - SEA 
+                         -TB - TEN - WAS
+                         -avg_rectd_plyr-avg_trg_team-avg_tdr_team-avg_rbra_team
+                         -avg_fuml_team-avg_fuml_plyr-avg_qbints_team-avg_qbtdp_team-avg_qbints_plyr
+                         -bad_weather_1-grass_1)
+
+summary(linRegtdr2)
+```
+```{r}
+linRegtdr3 <- update(linRegtdr2,~.-is_WR-is_TE-forty1-DET-HOU-NYG-STL-avg_rbry_pos)
+summary(linRegtdr3)
+```
+
+##Plots for rushing TDs
+```{r}
+par(mar = c(4, 4, 2, 2), mfrow = c(2, 2))
+plot(linRegtdr3, which = c(1:3,2))
+```
+
+##Fumbles
+```{r,echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+set.seed(123)
+splitfuml <- sample.split(nfl_data$fuml, SplitRatio = 0.7)
+Trainfuml <- subset(nfl_data, split == TRUE)
+Testfuml <- subset(nfl_data, split == FALSE)
+preProcValues <- preProcess(Trainfuml, method = c("center", "scale"))
+trainTransformedfuml <- predict(preProcValues, Trainfuml)
+testTransformedfuml <- predict(preProcValues, Testfuml)
+fumlregform <- formula(paste("fuml ~ ", 
+                           paste(colnames(filtered_nfl_data_fields), collapse="+")))
+
+linRegFumble <- lm(fumlregform, data = trainTransformedfuml)
+summary(linRegFumble)
+
+linRegFumble2 <- lm(fuml ~ avg_fuml_plyr, data = trainTransformedfuml)
+```
+```{r}
+summary(linRegFumble2)
+```
+
+##Plots for fumbles
+```{r}
+par(mar = c(4, 4, 2, 2), mfrow = c(2, 2))
+plot(linRegFumble2, which = c(1:3,5))
+```
+
+
+##Conclusion
+Rushing and passing data seems to be something that linear regression has better predictions for that receiving.  This makes sense.  RB's and QB's are generally singular players on the field.  Both are heavily invested in by teams and are given a lot of touches every game.  Receiving is a little more spread out.  There are generally at minimum, 3 players in a receiving capacity (excluding the RB), 2 WR and a TE.  There can be up to 4 WR on the field, so trying to predict who gets the ball will be harder because it is more uncertain.
+
+RB's are negatively effected by age, the data supports this well known fact, I was glad to see that relationship.
+
+Fumbles and INTs are also going to be hard to predict because they are generally random, but highly dependent upon the player carrying the ball and the defense they are playing against.
+
