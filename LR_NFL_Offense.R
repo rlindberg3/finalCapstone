@@ -1,6 +1,4 @@
 
-
-
 suppressMessages(library(dplyr))
 suppressMessages(library(tidyr))
 suppressMessages(library(ggplot2))
@@ -8,6 +6,9 @@ suppressMessages(library(reshape2))
 suppressMessages(library(caTools))
 suppressMessages(library(caret))
 suppressMessages(library(GGally))
+suppressMessages(library(randomForest))
+suppressMessages(library(e1071))
+suppressMessages(library(caret))
 
 nfl_data <- read.csv("NFL_offense.csv")
 
@@ -376,7 +377,7 @@ summary(linRegrecy3)
 RecyPredicted <- predict(linRegrecy3, newdata = testTransformed)
 
 SSErecy <- sum((RecyPredicted - testTransformed$recy)^2)
-SSTrecy <- sum((mean(nfl_data$recy)-testTransformed$recy)^2)
+SSTrecy <- sum((mean(c(testTransformed$recy, trainTransformed$recy))-testTransformed$recy)^2)
 r2_recy <- 1 - SSErecy/SSTrecy 
 r2_recy
 rmse_recy <- sqrt(SSErecy/nrow(testTransformed))
@@ -394,7 +395,20 @@ anova(linRegrecy3)
 
 #aic 
 aic_recy <- step(lm(wrrecyregform, data = trainTransformed), direction = "backward")
+summary(aic_recy)
 
+
+#randomforest
+forest_recy <- randomForest(wrrecyregform, data = trainTransformed, 
+                            importance = TRUE, ntree = 500)
+plot(forest_recy)
+varImpPlot(forest_recy)
+var.imp.for_recy<- data.frame(importance(forest_recy, type = 2))
+var.imp.for_recy$variables <- row.names(var.imp.for_recy)
+
+confusionMatrix(data=,
+                reference=,
+                positive='yes')
 ######################################################
 set.seed(123)
 splitrec <- sample.split(nfl_data$rec, SplitRatio = 0.7)
@@ -430,7 +444,7 @@ summary(linRegrec2)
 RecPredicted <- predict(linRegrec2, newdata = testTransformedrec)
 
 SSErec <- sum((RecPredicted - testTransformedrec$rec)^2)
-SSTrec <- sum((mean(nfl_data$rec)-testTransformedrec$rec)^2)
+SSTrec <- sum((mean(c(testTransformedrec$rec,trainTransformedrec$rec))-testTransformedrec$rec)^2)
 r2_rec <- 1 - SSErec/SSTrec 
 r2_rec
 rmse_rec <- sqrt(SSErec/nrow(testTransformedrec))
@@ -446,6 +460,15 @@ coef(summary(linRegrec2))
 anova(linRegrec2)
 #aic 
 aic_rec <- step(lm(recregform, data = TrainRecy), direction = "backward")
+summary(aic_rec)
+
+#randomforest
+forest_rec <- randomForest(recregform, data = trainTransformedrec, 
+                            importance = TRUE, ntree = 500)
+plot(forest_rec)
+varImpPlot(forest_rec)
+forest_rec
+
 
 ############################################################
 set.seed(123)
@@ -485,7 +508,7 @@ summary(linRegtrg2)
 TrgPredicted <- predict(linRegtrg2, newdata = testTransformedtrg)
 
 SSEtrg <- sum((TrgPredicted - testTransformedtrg$trg)^2)
-SSTtrg <- sum((mean(nfl_data$trg)-testTransformedtrg$trg)^2)
+SSTtrg <- sum((mean(c(testTransformedtrg$trg, trainTransformedtrg$trg))-testTransformedtrg$trg)^2)
 r2_trg <- 1 - SSEtrg/SSTtrg 
 r2_trg
 rmse_trg <- sqrt(SSEtrg/nrow(testTransformedtrg))
@@ -501,6 +524,13 @@ coef(summary(linRegtrg2))
 anova(linRegtrg2)
 #aic 
 aic_trg <- step(lm(trgregform, data = trainTransformedtrg), direction = "backward")
+summary(aic_trg)
+
+#randomforest
+forest_trg <- randomForest(trgregform, data = trainTransformedtrg, 
+                           importance = TRUE, ntree = 500)
+plot(forest_trg)
+varImpPlot(forest_trg)
 
 
 #################################################
@@ -549,7 +579,7 @@ summary(linRegRecTD3)
 RectdPredicted <- predict(linRegRecTD3, newdata = testTransformedtdrec)
 
 SSErectd <- sum((RectdPredicted - testTransformedtdrec$tdrec)^2)
-SSTrectd <- sum((mean(nfl_data$tdrec)-testTransformedtdrec$tdrec)^2)
+SSTrectd <- sum((mean(c(testTransformedtdrec$tdrec,trainTransformedtdrec$tdrec))-testTransformedtdrec$tdrec)^2)
 r2_rectd <- 1 - SSErectd/SSTrectd 
 r2_rectd
 rmse_rectd <- sqrt(SSEtrg/nrow(testTransformedtdrec))
@@ -567,6 +597,13 @@ anova(linRegRecTD3)
 
 #aic 
 aic_tdrec <- step(lm(tdrecregform, data = trainTransformedtdrec), direction = "backward")
+summary(aic_tdrec)
+
+#randomforest
+forest_tdrec <- randomForest(tdrecgregform, data = trainTransformedtdrec, 
+                           importance = TRUE, ntree = 500)
+plot(forest_tdrec)
+varImpPlot(forest_tdrec)
 
 
 #############################################################
@@ -607,7 +644,7 @@ summary(linRegQBpyds2)
 PydsdPredicted <- predict(linRegQBpyds2, newdata = testTransformedpy)
 
 SSEpyds <- sum((PydsdPredicted - testTransformedpy$py)^2)
-SSTpyds <- sum((mean(nfl_data$py)-testTransformedpy$py)^2)
+SSTpyds <- sum((mean(c(testTransformedpy$py,trainTransformedpy$py))-testTransformedpy$py)^2)
 r2_pyds <- 1 - SSEpyds/SSTpyds 
 r2_pyds
 rmse_pyds <- sqrt(SSEpyds/nrow(testTransformedpy))
@@ -624,6 +661,13 @@ anova(linRegQBpyds2)
 
 #aic 
 aic_py <- step(lm(pyregform, data = trainTransformedpy), direction = "backward")
+summary(aic_py)
+
+#randomforest
+forest_py <- randomForest(pyregform, data = trainTransformedpy, 
+                             importance = TRUE, ntree = 500)
+plot(forest_py)
+varImpPlot(forest_py)
 
 
 ######################################################################
@@ -661,7 +705,7 @@ summary(linRegQBpc2)
 PcPredicted <- predict(linRegQBpc2, newdata = testTransformedpc)
 
 SSEpc <- sum((PcPredicted - testTransformedpc$pc)^2)
-SSTpc <- sum((mean(nfl_data$pc)-testTransformedpc$pc)^2)
+SSTpc <- sum((mean(c(testTransformedpc$pc,trainTransformedpc$pc))-testTransformedpc$pc)^2)
 r2_pc <- 1 - SSEpc/SSTpc 
 r2_pc
 rmse_pc <- sqrt(SSEpc/nrow(testTransformedpc))
@@ -678,6 +722,13 @@ anova(linRegQBpc2)
 
 #aic 
 aic_pc <- step(lm(pcregform, data = trainTransformedpc), direction = "backward")
+summary(aic_pc)
+
+#randomforest
+forest_pc <- randomForest(pcregform, data = trainTransformedpc, 
+                          importance = TRUE, ntree = 500)
+plot(forest_pc)
+varImpPlot(forest_pc)
 
 ##########################################################
 set.seed(123)
@@ -712,7 +763,7 @@ summary(linRegQBInts2)
 PintPredicted <- predict(linRegQBInts2, newdata = testTransformedints)
 
 SSEint <- sum((PintPredicted - testTransformedints$ints)^2)
-SSTint <- sum((mean(nfl_data$ints)-testTransformedints$ints)^2)
+SSTint <- sum((mean(c(testTransformedints$ints,trainTransformedints$ints))-testTransformedints$ints)^2)
 r2_int <- 1 - SSEint/SSTint 
 r2_int
 rmse_int <- sqrt(SSEint/nrow(testTransformedints))
@@ -729,7 +780,13 @@ anova(linRegQBInts2)
 
 #aic 
 aic_ints <- step(lm(intsregform, data = trainTransformedints), direction = "backward")
+summary(aic_ints)
 
+#randomforest
+forest_ints <- randomForest(intsregform, data = trainTransformedints, 
+                          importance = TRUE, ntree = 500)
+plot(forest_ints)
+varImpPlot(forest_ints)
 
 ####################################################################
 set.seed(123)
@@ -770,7 +827,7 @@ summary(linRegQBpa3)
 PaPredicted <- predict(linRegQBpa3, newdata = testTransformedpa)
 
 SSEpa <- sum((PaPredicted - testTransformedpa$pa)^2)
-SSTpa <- sum((mean(nfl_data$pa)-testTransformedpa$pa)^2)
+SSTpa <- sum((mean(c(testTransformedpa$pa,trainTransformedpa$pa))-testTransformedpa$pa)^2)
 r2_pa <- 1 - SSEpa/SSTpa 
 r2_pa
 rmse_pa <- sqrt(SSEpa/nrow(testTransformedpa))
@@ -787,6 +844,13 @@ anova(linRegQBpa3)
 
 #aic 
 aic_pa <- step(lm(paregform, data = trainTransformedpa), direction = "backward")
+summary(aic_pa)
+
+#randomforest
+forest_pa <- randomForest(paregform, data = trainTransformedpa, 
+                          importance = TRUE, ntree = 500)
+plot(forest_pa)
+varImpPlot(forest_pa)
 
 #################################################################
 set.seed(123)
@@ -828,7 +892,7 @@ summary(linRegRushYd2)
 RushydsPredicted <- predict(linRegRushYd2, newdata = testTransformedry)
 
 SSEruyd <- sum((RushydsPredicted - testTransformedry$ry)^2)
-SSTruyd <- sum((mean(nfl_data$ry)-testTransformedry$ry)^2)
+SSTruyd <- sum((mean(c(testTransformedry$ry,trainTransformedry$ry))-testTransformedry$ry)^2)
 r2_ruyd <- 1 - SSEruyd/SSTruyd 
 r2_ruyd
 rmse_ruyd <- sqrt(SSEruyd/nrow(testTransformedry))
@@ -846,6 +910,13 @@ anova(linRegRushYd2)
 
 #aic 
 aic_ry <- step(lm(ryregform, data = trainTransformedry), direction = "backward")
+summary(aic_ry)
+
+#randomforest
+forest_ry <- randomForest(ryregform, data = trainTransformedry, 
+                          importance = TRUE, ntree = 500)
+plot(forest_ry)
+varImpPlot(forest_ry)
 
 
 #############################################################################
@@ -892,7 +963,7 @@ summary(linRegRushAtt3)
 RushattPredicted <- predict(linRegRushAtt, newdata = testTransformedra)
 
 SSEruatt <- sum((RushattPredicted - testTransformedra$ra)^2)
-SSTruatt <- sum((mean(nfl_data$ra)-testTransformedra$ra)^2)
+SSTruatt <- sum((mean(c(testTransformedra$ra,trainTransformedra$ra))-testTransformedra$ra)^2)
 r2_ruatt <- 1 - SSEruatt/SSTruatt 
 r2_ruatt
 rmse_ruatt <- sqrt(SSEruatt/nrow(testTransformedra))
@@ -908,7 +979,14 @@ coef(summary(linRegRushAtt3))
 anova(linRegRushAtt3)
 
 #aic 
-aic_ra <- step(lm(raregform, data = trainTransformedra), direction = "backward")
+aic_tdr <- step(lm(raregform, data = trainTransformedra), direction = "backward")
+summary(aic_tdr)
+
+#randomforest
+forest_ra <- randomForest(raregform, data = trainTransformedra, 
+                          importance = TRUE, ntree = 500)
+plot(forest_ra)
+varImpPlot(forest_ra)
 
 ############################################################
 set.seed(123)
@@ -970,7 +1048,14 @@ coef(summary(linRegtdr3))
 anova(linRegtdr3)
 
 #aic 
-aic_ra <- step(lm(tdrregform, data = trainTransformedtdr), direction = "backward")
+aic_tdr <- step(lm(tdrregform, data = trainTransformedtdr), direction = "backward")
+summary(aic_tdr)
+
+#randomforest
+forest_tdr <- randomForest(tdrregform, data = trainTransformedtdr, 
+                          importance = TRUE, ntree = 500)
+plot(forest_tdr)
+varImpPlot(forest_tdr)
 
 ############################################################
 
@@ -1024,6 +1109,13 @@ anova(linRegFumble2)
 
 #aic 
 aic_fuml <- step(lm(fumlregform, data = trainTransformedfuml), direction = "backward")
+summary(aic_fuml)
+
+#randomforest
+forest_fuml <- randomForest(fumlregform, data = trainTransformedfuml, 
+                          importance = TRUE, ntree = 500)
+plot(forest_fuml)
+varImpPlot(forest_fuml)
 
 ##########################################################################
 

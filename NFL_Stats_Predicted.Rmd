@@ -17,7 +17,7 @@ I went to the website [http://armchairanalysis.com/data.php](www.armchairanlysis
 
 I then queried the DB to get the fields I would need.  This operation took extensive time, so once it ran, I exported to a csv file, then read the csv into R.
 
-```{r }
+```{r , message=FALSE}
 suppressMessages(library(dplyr))
 suppressMessages(library(tidyr))
 suppressMessages(library(ggplot2))
@@ -25,6 +25,8 @@ suppressMessages(library(reshape2))
 suppressMessages(library(caTools))
 suppressMessages(library(caret))
 suppressMessages(library(GGally))
+suppressMessages(library(randomForest))
+suppressMessages(library(e1071))
 
 
 nfl_data <- read.csv("NFL_offense.csv")
@@ -68,7 +70,7 @@ nfl_data <- mutate(nfl_data, bad_weather_1 = ifelse(cond == "Light Rain" |
 
 #### Home field advantage
 Do players play better at home?
-```{r }
+```{r}
 #identify home team
 nfl_data$h <- as.character(nfl_data$h)
 nfl_data$team <- as.character(nfl_data$team)
@@ -77,7 +79,7 @@ nfl_data <- mutate(nfl_data, home_team_1=  ifelse(h == team, 1,0))
 
 #### Positions
 Ignoring player stats, does the position matter
-```{r eval=FALSE}
+```{r}
 #identify position
 nfl_data <- mutate(nfl_data, is_WR =  ifelse(pos1 == "WR", 1,0))
 nfl_data <- mutate(nfl_data, is_TE =  ifelse(pos1 == "TE", 1,0))
@@ -412,7 +414,7 @@ I tested cutoffs at 0.8, 0.85, 0.9 correlation, then removed the columns that we
 ## Receiving Regressions
 
 We have to set up our test and training data with preProcess:
-```{r}
+```{r }
 set.seed(123)
 split <- sample.split(nfl_data$recy, SplitRatio = 0.7)
 TrainRecy <- subset(nfl_data, split == TRUE)
@@ -441,21 +443,21 @@ Now that we are ready to train and test the data, let's do it!
 
 wrrecyregform <- formula(paste("recy ~ ", 
                          paste(colnames(filtered_nfl_data_fields), collapse="+")))
-
+```
+```{r}
 #first run of the recy regression
 linRegrecy <- lm(wrrecyregform, data = trainTransformed)
-summary(linRegrecy)
-
 #updating formula to take out insignigicant values
 linRegrecy2 <- update(linRegrecy, ~. -height- hot_weather - home_team_1-vertical1-BUF-DAL-DEN-GB
                       -NE-NOR-NYJ-SEA
                       -avg_trg_team-avg_tdr_team-avg_rbra_team-avg_fuml_plyr-avg_fuml_team
                       -avg_qbints_plyr
                       -avg_qbints_team-avg_qbtdp_team-bad_weather1)
-summary(linRegrecy2)
-
 #updating formulas to remove any insignificant values
 linRegrecy3 <- update(linRegrecy2, ~. -JAC)
+```
+
+```{r}
 summary(linRegrecy3)
 
 ```
@@ -468,7 +470,7 @@ Testing the data, we see that the training set and the test set are similar.  Th
 RecyPredicted <- predict(linRegrecy3, newdata = testTransformed)
 
 SSErecy <- sum((RecyPredicted - testTransformed$recy)^2)
-SSTrecy <- sum((mean(nfl_data$recy)-testTransformed$recy)^2)
+SSTrecy <- sum((mean(c(testTransformed$recy, trainTransformed$recy))-testTransformed$recy)^2)
 r2_recy <- 1 - SSErecy/SSTrecy 
 r2_recy
 rmse_recy <- sqrt(SSErecy/nrow(testTransformed))
@@ -496,12 +498,24 @@ anova(linRegrecy3)
 I would say overall, the model is just okay for predicting.  The average yards receiving historical for the player is really the best predictor according to this analysis
 
 Now we inspect the AIC:
-```{r}
+```{r, results="hide"}
 #aic 
 aic_recy <- step(lm(wrrecyregform, data = trainTransformed), direction = "backward")
 ```
 AIC appeared to be very similar to linear regression
 
+```{r}
+summary(aic_recy)
+```
+
+We then run this analysis through randomForest:
+```{r}
+forest_recy <- randomForest(wrrecyregform, data = trainTransformed, 
+                            importance = TRUE, ntree = 500)
+plot(forest_recy)
+varImpPlot(forest_recy)
+
+```
 
 ###Receptions
 Preprocess:
@@ -527,7 +541,7 @@ ggpairs(nfl_data[,c("rec",colnames(filtered_nfl_data_fields[46:51]))])
 
 ```
 ####Regressions
-```{r}
+```{r, results="hide"}
 recregform <- formula(paste("rec ~ ", 
                                paste(colnames(filtered_nfl_data_fields), collapse="+")))
 
@@ -538,16 +552,19 @@ summary(linRegrec)
   
 linRegrec2 <- update(linRegrec, ~. -hot_weather -forty1 -GB - SEA -avg_trg_team -avg_tdr_team
                      -avg_rbra_team -avg_fuml_team -avg_qbtdp_team - avg_qbints_team)
+```
+
+```{r}
 summary(linRegrec2)
 ```
 We had a modest r-square improvement.  The R2 is not very strong (0.4457), and we achieved approximately the same value when we cut the variables down to just 6.  Much simpler model with similar results
 
 Testing the data, we see that the training set and the test set are similar.  The model seems to hold up through testing
-``` {r}
+```{r}
 RecPredicted <- predict(linRegrec2, newdata = testTransformedrec)
 
 SSErec <- sum((RecPredicted - testTransformedrec$rec)^2)
-SSTrec <- sum((mean(nfl_data$rec)-testTransformedrec$rec)^2)
+SSTrec <- sum((mean(c(testTransformedrec$rec,trainTransformedrec$rec))-testTransformedrec$rec)^2)
 r2_rec <- 1 - SSErec/SSTrec 
 r2_rec
 rmse_rec <- sqrt(SSErec/nrow(testTransformedrec))
@@ -572,12 +589,22 @@ anova(linRegrec2)
 Like the model above, linear regression may not be the best predictor for this statistic
 
 AIC:
-```{r}
+```{r, results="hide"}
 aic_rec <- step(lm(recregform, data = TrainRecy), direction = "backward")
-
 ```
 AIC appeared to be very similar to the linear regression
+```{r}
+summary(aic_rec)
+```
 
+We then run this through randomForest:
+```{r}
+forest_rec <- randomForest(recregform, data = trainTransformedrec, 
+                            importance = TRUE, ntree = 500)
+plot(forest_rec)
+varImpPlot(forest_rec)
+forest_rec
+```
 
 ###Targets
 Preprocess:
@@ -602,7 +629,7 @@ ggpairs(nfl_data[,c("trg",colnames(filtered_nfl_data_fields[46:51]))])
 
 ```
 
-```{r}
+```{r, results="hide"}
 trgregform <- formula(paste("trg ~ ", 
                             paste(colnames(filtered_nfl_data_fields), collapse="+")))
 
@@ -613,7 +640,9 @@ summary(linRegtrg)
 linRegtrg2 <- update(linRegtrg, ~. -height-cold_weather-hot_weather-forty1-vertical1-DAL-DEN-GB-NE-NOR-SEA
                  -avg_trg_team -avg_tdr_team-avg_rbra_team -avg_fuml_team -avg_qbtdp_team 
                  -avg_qbints_team - grass_1-bad_weather_1)
+```
 
+```{r}
 summary(linRegtrg2)
 ```
 
@@ -624,7 +653,7 @@ Testing the data, we see that the training set and the test set are similar.  Th
 TrgPredicted <- predict(linRegtrg2, newdata = testTransformedtrg)
 
 SSEtrg <- sum((TrgPredicted - testTransformedtrg$trg)^2)
-SSTtrg <- sum((mean(nfl_data$trg)-testTransformedtrg$trg)^2)
+SSTtrg <- sum((mean(c(testTransformedtrg$trg, trainTransformedtrg$trg))-testTransformedtrg$trg)^2)
 r2_trg <- 1 - SSEtrg/SSTtrg 
 r2_trg
 rmse_trg <- sqrt(SSEtrg/nrow(testTransformedtrg))
@@ -648,8 +677,20 @@ anova(linRegtrg2)
 This one was an improvement over the previous models. It still has its problems, and may need some refinement or other variables to improve the predictions.
 
 AIC:
-```{r}
+```{r, results="hide"}
 aic_trg <- step(lm(trgregform, data = trainTransformedtrg), direction = "backward")
+```
+
+```{r}
+summary(aic_trg)
+```
+
+RandomForest:
+```{r}
+forest_trg <- randomForest(trgregform, data = trainTransformedtrg, 
+                           importance = TRUE, ntree = 500)
+plot(forest_trg)
+varImpPlot(forest_trg)
 ```
 
 ###Receiving TD's
@@ -676,7 +717,7 @@ ggpairs(nfl_data[,c("tdrec",colnames(filtered_nfl_data_fields[46:51]))])
 
 ```
 
-```{r}
+```{r, results="hide"}
 tdrecregform <- formula(paste("tdrec ~ ", 
                             paste(colnames(filtered_nfl_data_fields), collapse="+")))
 
@@ -696,7 +737,9 @@ linRegRecTD2 <- update(linRegRecTD, ~. -height-weight-cold_weather-hot_weather-h
 summary(linRegRecTD2)
 
 linRegRecTD3 <- update(linRegRecTD2, ~. -ATL-CHI-NOR-SD-avg_qbints_plyr-avg_qbints_team)
+```
 
+```{r}
 summary(linRegRecTD3)
 ```
 The R2 is worsened in the second model, and the third. (the R2 in general is fairly low)  
@@ -707,7 +750,7 @@ Testing the data, we see that the training set and the test set are similar.  Th
 RectdPredicted <- predict(linRegRecTD3, newdata = testTransformedtdrec)
 
 SSErectd <- sum((RectdPredicted - testTransformedtdrec$tdrec)^2)
-SSTrectd <- sum((mean(nfl_data$tdrec)-testTransformedtdrec$tdrec)^2)
+SSTrectd <- sum((mean(c(testTransformedtdrec$tdrec,trainTransformedtdrec$tdrec))-testTransformedtdrec$tdrec)^2)
 r2_rectd <- 1 - SSErectd/SSTrectd 
 r2_rectd
 rmse_rectd <- sqrt(SSEtrg/nrow(testTransformedtdrec))
@@ -731,8 +774,21 @@ anova(linRegRecTD3)
 ```
 
 AIC:
-```{r}
+```{r, results="hide"}
 aic_tdrec <- step(lm(tdrecregform, data = trainTransformedtdrec), direction = "backward")
+```
+
+```{r}
+summary(aic_tdrec)
+```
+
+RandomForest:
+```{r}
+forest_tdrec <- randomForest(tdrecregform, data = trainTransformedtdrec, 
+                           importance = TRUE, ntree = 500)
+plot(forest_tdrec)
+varImpPlot(forest_tdrec)
+
 ```
 ##Passing
 
@@ -758,7 +814,7 @@ ggpairs(nfl_data[,c("py",colnames(filtered_nfl_data_fields[37:45]))])
 ggpairs(nfl_data[,c("py",colnames(filtered_nfl_data_fields[46:51]))])
 ```
 Regression:
-```{r}
+```{r,results="hide"}
 pyregform <- formula(paste("py ~ ", 
                               paste(colnames(filtered_nfl_data_fields), collapse="+")))
 
@@ -770,7 +826,9 @@ summary(linRegQBpyds)
 linRegQBpyds2 <- update(linRegQBpyds, ~.-hot_weather-home_team_1-vertical1-ATL-BAL-DAL-DEN-DET-KC
                         -NOR-PHI-PIT-SEA-SD-WAS-avg_trg_team-avg_tdr_team-avg_rbra_team-avg_rbry_plyr
                         -avg_fuml_team-avg_qbints_team-avg_qbtdp_team-grass_1)
+```
 
+```{r}
 summary(linRegQBpyds2)
 ```
 This prediction actually turned out to be pretty strong (R2 0.87) and we did it with only 5 variables!  This makes sense to me.  QB is a 1 player position, with a significant investment in the player.  A QB will get time to mature and prove himself good or bad.
@@ -780,7 +838,7 @@ Testing the data, we see that the training set and the test set are similar.  Th
 PydsdPredicted <- predict(linRegQBpyds2, newdata = testTransformedpy)
 
 SSEpyds <- sum((PydsdPredicted - testTransformedpy$py)^2)
-SSTpyds <- sum((mean(nfl_data$py)-testTransformedpy$py)^2)
+SSTpyds <- sum((mean(c(testTransformedpy$py,trainTransformedpy$py))-testTransformedpy$py)^2)
 r2_pyds <- 1 - SSEpyds/SSTpyds 
 r2_pyds
 rmse_pyds <- sqrt(SSEpyds/nrow(testTransformedpy))
@@ -804,8 +862,21 @@ anova(linRegQBpyds2)
 ```
 
 AIC:
-```{r}
+```{r, results="hide"}
 aic_py <- step(lm(pyregform, data = trainTransformedpy), direction = "backward")
+```
+
+```{r}
+summary(aic_py)
+```
+
+RandomForest:
+```{r}
+forest_py <- randomForest(pyregform, data = trainTransformedpy, 
+                             importance = TRUE, ntree = 500)
+plot(forest_py)
+varImpPlot(forest_py)
+
 ```
 Conclusion, this predicts well, but it seems like this could be driven by some chance.  QB statistics remind me of baseball statistics.  One batter vs One pitcher.  A QB is really like a pitcher or a batter.  The opponent is more complex, however one side of the equation is "controlled".
 
@@ -833,7 +904,7 @@ ggpairs(nfl_data[,c("pc",colnames(filtered_nfl_data_fields[46:51]))])
 
 ```
 
-```{r}
+```{r, results="hide"}
 pcregform <- formula(paste("pc ~ ", 
                            paste(colnames(filtered_nfl_data_fields), collapse="+")))
 
@@ -844,6 +915,8 @@ summary(linRegQBpc)
 linRegQBpc2 <- update(linRegQBpc, ~.-hot_weather-home_team_1-vertical1-ATL-BAL-CIN-DAL-DEN-DET-KC
                       -MIA-PHI-PIT-SEA-STL-WAS-avg_trg_team-avg_tdr_team-avg_rbra_team
                       -avg_rbry_plyr-avg_fuml_team-avg_qbints_team-avg_qbtdp_team-grass_1 )
+```
+```{r}
 summary(linRegQBpc2)
 ```
 Again, R2 is very strong, model stays strong when model is shrunk to 8 variables.  Not surprising (to me) bad weather and cold weather hurt completions.  It is harder to throw a ball in bad weather and catch a ball in bad weather.
@@ -853,7 +926,7 @@ Testing the data, we see that the training set and the test set are similar.  Th
 PcPredicted <- predict(linRegQBpc2, newdata = testTransformedpc)
 
 SSEpc <- sum((PcPredicted - testTransformedpc$pc)^2)
-SSTpc <- sum((mean(nfl_data$pc)-testTransformedpc$pc)^2)
+SSTpc <- sum((mean(c(testTransformedpc$pc,trainTransformedpc$pc))-testTransformedpc$pc)^2)
 r2_pc <- 1 - SSEpc/SSTpc 
 r2_pc
 rmse_pc <- sqrt(SSEpc/nrow(testTransformedpc))
@@ -881,9 +954,22 @@ AIC:
 ```{r}
 aic_pc <- step(lm(pcregform, data = trainTransformedpc), direction = "backward")
 ```
+
+```{r}
+summary(aic_pc)
+```
+
+RandomForest:
+```{r}
+forest_pc <- randomForest(pcregform, data = trainTransformedpc, 
+                          importance = TRUE, ntree = 500)
+plot(forest_pc)
+varImpPlot(forest_pc)
+```
+
 ###Ints
 PreProcess:
-```{r}
+```{r, results="hide"}
 set.seed(123)
 splitints <- sample.split(nfl_data$ints, SplitRatio = 0.7)
 Trainints <- subset(nfl_data, split == TRUE)
@@ -903,7 +989,7 @@ ggpairs(nfl_data[,c("ints",colnames(filtered_nfl_data_fields[37:45]))])
 ggpairs(nfl_data[,c("ints",colnames(filtered_nfl_data_fields[46:51]))])
 ```
 
-```{r}
+```{r, results="hide"}
 intsregform <- formula(paste("ints ~ ", 
                            paste(colnames(filtered_nfl_data_fields), collapse="+")))
 
@@ -911,7 +997,9 @@ linRegQBInts <- lm(intsregform, data = trainTransformedints)
 summary(linRegQBInts) 
 
 linRegQBInts2 <- lm(ints ~ avg_qbints_plyr, data = trainTransformedints)
+```
 
+```{r}
 summary(linRegQBInts2)
 ```
 R2 of 0.4169, and really the only meaningful predictor was "how many interceptions have you thrown in the past".  Not an entirely amazing model, but at least we have something here.
@@ -921,7 +1009,7 @@ Testing the data, we see that the training set and the test set are similar.  Th
 PintPredicted <- predict(linRegQBInts2, newdata = testTransformedints)
 
 SSEint <- sum((PintPredicted - testTransformedints$ints)^2)
-SSTint <- sum((mean(nfl_data$ints)-testTransformedints$ints)^2)
+SSTint <- sum((mean(c(testTransformedints$ints,trainTransformedints$ints))-testTransformedints$ints)^2)
 r2_int <- 1 - SSEint/SSTint 
 r2_int
 rmse_int <- sqrt(SSEint/nrow(testTransformedints))
@@ -948,9 +1036,21 @@ AIC:
 aic_ints <- step(lm(intsregform, data = trainTransformedints), direction = "backward")
 ```
 
+```{r}
+summary(aic_ints)
+```
+
+RandomForest:
+```{r}
+forest_ints <- randomForest(intsregform, data = trainTransformedints, 
+                          importance = TRUE, ntree = 500)
+plot(forest_ints)
+varImpPlot(forest_ints)
+
+```
 ###Pass Attempts
 PreProcess:
-```{r}
+```{r, results="hide"}
 set.seed(123)
 splitpa <- sample.split(nfl_data$pa, SplitRatio = 0.7)
 Trainpa <- subset(nfl_data, split == TRUE)
@@ -971,7 +1071,7 @@ ggpairs(nfl_data[,c("pa",colnames(filtered_nfl_data_fields[37:45]))])
 ggpairs(nfl_data[,c("pa",colnames(filtered_nfl_data_fields[46:51]))])
 ```
 
-```{r}
+```{r, results="hide"}
 paregform <- formula(paste("pa ~ ", 
                              paste(colnames(filtered_nfl_data_fields), collapse="+")))
 
@@ -985,6 +1085,9 @@ linRegQBpa2 <- update(linRegQBpa, ~.-hot_weather-home_team_1-ATL-BAL-CLE-DAL-DEN
 summary(linRegQBpa2)
 
 linRegQBpa3 <- update(linRegQBpa2, ~.-vertical1-IND-PHI-PIT )
+```
+
+```{r}
 summary(linRegQBpa3)
 ```
 R2 is strong.  This stat is the catalyst Ints, completions, TD's.  You have to attempt a pass in order to achieve a stat in any of these three categories.
@@ -994,7 +1097,7 @@ Testing the data, we see that the training set and the test set are similar.  Th
 PaPredicted <- predict(linRegQBpa3, newdata = testTransformedpa)
 
 SSEpa <- sum((PaPredicted - testTransformedpa$pa)^2)
-SSTpa <- sum((mean(nfl_data$pa)-testTransformedpa$pa)^2)
+SSTpa <- sum((mean(c(testTransformedpa$pa,trainTransformedpa$pa))-testTransformedpa$pa)^2)
 r2_pa <- 1 - SSEpa/SSTpa 
 r2_pa
 rmse_pa <- sqrt(SSEpa/nrow(testTransformedpa))
@@ -1018,14 +1121,27 @@ anova(linRegQBpa3)
 ```
 
 AIC:
-```{r}
+```{r, results="hide"}
 aic_pa <- step(lm(paregform, data = trainTransformedpa), direction = "backward")
+```
+
+```{r}
+summary(aic_pa)
+```
+
+RandomForest:
+```{r}
+forest_pa <- randomForest(paregform, data = trainTransformedpa, 
+                          importance = TRUE, ntree = 500)
+plot(forest_pa)
+varImpPlot(forest_pa)
+
 ```
 ##Rushing Stats
 
 ###Rushing Yards
 PreProcess:
-```{r}
+```{r, results="hide"}
 set.seed(123)
 splitry <- sample.split(nfl_data$ry, SplitRatio = 0.7)
 Trainry <- subset(nfl_data, split == TRUE)
@@ -1046,7 +1162,7 @@ ggpairs(nfl_data[,c("ry",colnames(filtered_nfl_data_fields[37:45]))])
 ggpairs(nfl_data[,c("ry",colnames(filtered_nfl_data_fields[46:51]))])
 ```
 
-```{r}
+```{r, results="hide"}
 ryregform <- formula(paste("ry ~ ", 
                            paste(colnames(filtered_nfl_data_fields), collapse="+")))
 
@@ -1061,7 +1177,9 @@ linRegRushYd2 <- update(linRegRushYd,~.-height-weight-hot_weather-home_team_1-is
                         -avg_rectd_plyr-avg_trg_team-avg_tdr_team-avg_rbra_team-avg_rbry_pos
                         -avg_fuml_team-avg_fuml_plyr-avg_qbints_team-avg_qbtdp_team
                         -avg_qbints_plyr-bad_weather_1-grass_1)
+```
 
+```{r}
 summary(linRegRushYd2)
 ```
 
@@ -1070,7 +1188,7 @@ Testing the data, we see that the training set and the test set are similar.  Th
 RushydsPredicted <- predict(linRegRushYd2, newdata = testTransformedry)
 
 SSEruyd <- sum((RushydsPredicted - testTransformedry$ry)^2)
-SSTruyd <- sum((mean(nfl_data$ry)-testTransformedry$ry)^2)
+SSTruyd <- sum((mean(c(testTransformedry$ry,trainTransformedry$ry))-testTransformedry$ry)^2)
 r2_ruyd <- 1 - SSEruyd/SSTruyd 
 r2_ruyd
 rmse_ruyd <- sqrt(SSEruyd/nrow(testTransformedry))
@@ -1093,13 +1211,25 @@ anova(linRegRushYd2)
 ```
 
 AIC:
-```{r}
+```{r, results="hide"}
 aic_ry <- step(lm(ryregform, data = trainTransformedry), direction = "backward")
 ```
 
+```{r}
+summary(aic_ry)
+```
+
+RandomForest:
+```{r}
+forest_ry <- randomForest(ryregform, data = trainTransformedry, 
+                          importance = TRUE, ntree = 500)
+plot(forest_ry)
+varImpPlot(forest_ry)
+
+```
 ###Rushing attempts
 PreProcess:
-```{r}
+```{r, results="hide"}
 set.seed(123)
 splitra <- sample.split(nfl_data$ra, SplitRatio = 0.7)
 Trainra <- subset(nfl_data, split == TRUE)
@@ -1120,7 +1250,7 @@ ggpairs(nfl_data[,c("ra",colnames(filtered_nfl_data_fields[37:45]))])
 ggpairs(nfl_data[,c("ra",colnames(filtered_nfl_data_fields[46:51]))])
 ```
 
-```{r}
+```{r, results="hide"}
 raregform <- formula(paste("ra ~ ", 
                            paste(colnames(filtered_nfl_data_fields), collapse="+")))
 
@@ -1139,6 +1269,9 @@ linRegRushAtt2 <- update(linRegRushYd,~.-height-weight-hot_weather-home_team_1-a
 summary(linRegRushAtt2)
 
 linRegRushAtt3 <- update(linRegRushYd,~.-is_WR-forty1-is_TE-DET-HOU-NYG-STL-avg_rbry_pos)
+```
+
+```{r}
 summary(linRegRushAtt3)
 ```
 Testing the data, we see that the training set and the test set are similar.  The model seems to hold up through testing
@@ -1146,7 +1279,7 @@ Testing the data, we see that the training set and the test set are similar.  Th
 RushattPredicted <- predict(linRegRushAtt, newdata = testTransformedra)
 
 SSEruatt <- sum((RushattPredicted - testTransformedra$ra)^2)
-SSTruatt <- sum((mean(nfl_data$ra)-testTransformedra$ra)^2)
+SSTruatt <- sum((mean(c(testTransformedra$ra,trainTransformedra$ra))-testTransformedra$ra)^2)
 r2_ruatt <- 1 - SSEruatt/SSTruatt 
 r2_ruatt
 rmse_ruatt <- sqrt(SSEruatt/nrow(testTransformedra))
@@ -1169,12 +1302,25 @@ anova(linRegRushAtt3)
 ```
 
 AIC
-```{r}
+```{r, results="hide"}
 aic_ra <- step(lm(raregform, data = trainTransformedra), direction = "backward")
+```
+
+```{r}
+summary(aic_ra)
+```
+
+RandomForest:
+```{r}
+forest_ra <- randomForest(raregform, data = trainTransformedra, 
+                          importance = TRUE, ntree = 500)
+plot(forest_ra)
+varImpPlot(forest_ra)
+
 ```
 ###TDR
 PreProcess:
-```{r}
+```{r, results="hide"}
 set.seed(123)
 splitdr <- sample.split(nfl_data$tdr, SplitRatio = 0.7)
 Traintdr <- subset(nfl_data, split == TRUE)
@@ -1195,7 +1341,7 @@ ggpairs(nfl_data[,c("tdr",colnames(filtered_nfl_data_fields[46:51]))])
 ```
 
 regression:
-```{r}
+```{r, results="hide"}
 tdrregform <- formula(paste("ra ~ ", 
                            paste(colnames(filtered_nfl_data_fields), collapse="+")))
 
@@ -1214,6 +1360,9 @@ linRegtdr2 <- update(linRegRushYd,~.-height-weight-hot_weather
 summary(linRegtdr2)
 
 linRegtdr3 <- update(linRegtdr2,~.-is_WR-is_TE-forty1-DET-HOU-NYG-STL-avg_rbry_pos)
+```
+
+```{r}
 summary(linRegtdr3)
 ```
 
@@ -1246,12 +1395,26 @@ anova(linRegtdr3)
 ```
 
 AIC:
-```{r}
-aic_ra <- step(lm(tdrregform, data = trainTransformedtdr), direction = "backward")
+```{r, results="hide"}
+aic_tdr <- step(lm(tdrregform, data = trainTransformedtdr), direction = "backward")
 ```
+
+```{r}
+summary(aic_tdr)
+```
+
+RandomForest:
+```{r}
+forest_tdr <- randomForest(tdrregform, data = trainTransformedtdr, 
+                          importance = TRUE, ntree = 500)
+plot(forest_tdr)
+varImpPlot(forest_tdr)
+```
+
+
 ###Fumbles
 PreProcess:
-```{r}
+```{r, results="hide"}
 set.seed(123)
 splitfuml <- sample.split(nfl_data$fuml, SplitRatio = 0.7)
 Trainfuml <- subset(nfl_data, split == TRUE)
@@ -1271,7 +1434,7 @@ ggpairs(nfl_data[,c("fuml",colnames(filtered_nfl_data_fields[37:45]))])
 ggpairs(nfl_data[,c("fuml",colnames(filtered_nfl_data_fields[46:51]))])
 ```
 
-```{r}
+```{r, results="hide"}
 fumlregform <- formula(paste("fuml ~ ", 
                            paste(colnames(filtered_nfl_data_fields), collapse="+")))
 
@@ -1279,7 +1442,9 @@ linRegFumble <- lm(fumlregform, data = trainTransformedfuml)
 summary(linRegFumble)
 
 linRegFumble2 <- lm(fuml ~ avg_fuml_plyr, data = trainTransformedfuml)
+```
 
+```{r}
 summary(linRegFumble2)
 ```
 Definitely does not seem to be a good predictor
@@ -1317,6 +1482,18 @@ AIC:
 aic_fuml <- step(lm(fumlregform, data = trainTransformedfuml), direction = "backward")
 ```
 
+```{r}
+summary(aic_fuml)
+```
+
+RandomForest:
+```{r}
+forest_fuml <- randomForest(fumlregform, data = trainTransformedfuml, 
+                          importance = TRUE, ntree = 500)
+plot(forest_fuml)
+varImpPlot(forest_fuml)
+
+```
 ## Conclusions
 
 Rushing and passing data seems to be something that linear regression has better predictions for that receiving.  This makes sense.  RB's and QB's are generally singular players on the field.  Both are heavily invested in by teams and are given a lot of touches every game.  Receiving is a little more spread out.  There are generally at minimum, 3 players in a receiving capacity (excluding the RB), 2 WR and a TE.  There can be up to 4 WR on the field, so trying to predict who gets the ball will be harder because it is more uncertain.
